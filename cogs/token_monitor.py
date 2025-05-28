@@ -282,9 +282,11 @@ class TokenMonitor(commands.Cog):
     @bridge.bridge_command(name="monitorstatus", description="Get current monitoring status")
     async def monitor_status(self, ctx):
         # Delete the command message if it's a prefix command
+        message_deleted = False
         if hasattr(ctx, 'message') and ctx.message:
             try:
                 await ctx.message.delete()
+                message_deleted = True
             except discord.Forbidden:
                 pass
         
@@ -319,8 +321,11 @@ class TokenMonitor(commands.Cog):
             inline=True
         ).build()
         
-        await ctx.respond(embed=embed)
-    
+        if message_deleted:
+            await ctx.send(embed=embed)
+        else:
+            await ctx.respond(embed=embed)
+
     @bridge.bridge_command(name="togglemonitor", description="Enable/disable monitoring for this server")
     @commands.has_permissions(administrator=True)
     async def toggle_monitor(self, ctx):

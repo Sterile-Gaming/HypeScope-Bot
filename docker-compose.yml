@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  hypescope-bot:
+    build: .
+    container_name: hypescope-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - hypescope-network
+
+networks:
+  hypescope-network:
+    driver: bridge
