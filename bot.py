@@ -16,8 +16,14 @@ bot = bridge.Bot(command_prefix='!', intents=intents)
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     print(f'Bot is in {len(bot.guilds)} guilds')
-    
-bot.load_extensions("cogs")
+
+# Load cogs with better error handling
+try:
+    bot.load_extensions("cogs")
+    print("✅ All cogs loaded successfully")
+except Exception as e:
+    print(f"❌ Error loading cogs: {e}")
+    print("Bot will continue without some features")
 
 @bot.event
 async def on_message(message):
@@ -68,6 +74,11 @@ async def info(ctx):
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
     if token:
-        bot.run(token)
+        try:
+            bot.run(token)
+        except KeyboardInterrupt:
+            print("🛑 Bot stopped by user")
+        except Exception as e:
+            print(f"❌ Bot error: {e}")
     else:
         print("Error: DISCORD_TOKEN not found in environment variables")

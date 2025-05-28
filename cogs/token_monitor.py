@@ -126,14 +126,23 @@ class TokenMonitor(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         if hasattr(self, 'web3') and self.web3.is_connected():
-            self.token_monitor.start()
-            print("🔁 Token monitoring started")
+            if not self.token_monitor.is_running():
+                self.token_monitor.start()
+                print("🔁 Token monitoring started")
         else:
             print("❌ Token monitoring not started - Web3 connection failed")
 
     @tasks.loop(seconds=10)
     async def token_monitor(self):
         try:
+            # Check if web3 is still connected
+            if not self.web3.is_connected():
+                print("❌ Web3 connection lost, attempting to reconnect...")
+                self.web3 = Web3(Web3.HTTPProvider(self.RPC_URL))
+                if not self.web3.is_connected():
+                    print("❌ Failed to reconnect to Web3")
+                    return
+            
             latest_block = self.web3.eth.block_number
             
             # Ensure last_checked_block is not None
@@ -152,12 +161,34 @@ class TokenMonitor(commands.Cog):
                 await self.send_token_notification(event["args"])
             
             self.last_checked_block = latest_block
-            # Save config after updating block
-            self.save_config()
+            # Save config after updating block (less frequently to reduce I/O)
+            if latest_block % 10 == 0:  # Save every 10 blocks
+                self.save_config()
             
+        except KeyboardInterrupt:
+            print("🛑 Token monitoring stopped by user")
+            self.token_monitor.cancel()
         except Exception as e:
             print(f"❌ Error polling events: {e}")
-    
+            # Don't crash the task, just log the error and continue
+
+    @token_monitor.before_loop
+    async def before_token_monitor(self):
+        """Wait until bot is ready before starting the monitor"""
+        await self.bot.wait_until_ready()
+        print("🔄 Token monitor waiting for bot to be ready...")
+
+    @token_monitor.after_loop
+    async def after_token_monitor(self):
+        """Clean up after the monitor stops"""
+        if self.token_monitor.is_being_cancelled():
+            print("🛑 Token monitor task cancelled")
+        else:
+            print("❌ Token monitor task stopped unexpectedly")
+        
+        # Save config one final time
+        self.save_config()
+
     def _create_links_list(self, args):
         links = []
         for platform in ['website', 'twitter', 'telegram', 'discord']:
@@ -312,8 +343,12 @@ class TokenMonitor(commands.Cog):
         await ctx.respond(embed=embed, delete_after=5)
 
     def cog_unload(self):
+        """Properly clean up when cog is unloaded"""
+        print("🔄 Unloading token monitor cog...")
         self.save_config()  # Save config when cog is unloaded
-        self.token_monitor.cancel()
+        if hasattr(self, 'token_monitor') and self.token_monitor.is_running():
+            self.token_monitor.cancel()
+        print("✅ Token monitor cog unloaded")
 
 def setup(bot):
     bot.add_cog(TokenMonitor(bot))
