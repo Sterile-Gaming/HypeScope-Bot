@@ -11,6 +11,10 @@ class TokenMonitor(commands.Cog):
         self.bot = bot
         self.config_file = "config/token_monitor.json"
         
+        # Initialize default values first
+        self.last_checked_block = None
+        self.server_configs = {}  # Store configs per guild
+        
         # Load config
         self.config = self.load_config()
         
@@ -55,9 +59,17 @@ class TokenMonitor(commands.Cog):
         
         self.contract = self.web3.eth.contract(address=self.CONTRACT_ADDRESS, abi=self.ABI)
         self.event_signature_hash = self.web3.keccak(text="TokenCreated(address,address,string,string,string,string,string,string,string,string,uint256,uint256,uint256,uint256,uint256,uint256,uint256)").hex()
-        self.last_checked_block = self.config.get("last_checked_block", self.web3.eth.block_number - 1)
-        self.monitor_channel_id = self.config.get("monitor_channel_id", None)
-    
+        
+        # Fix initialization of last_checked_block
+        saved_block = self.config.get("last_checked_block")
+        if saved_block is None:
+            self.last_checked_block = self.web3.eth.block_number - 1
+        else:
+            self.last_checked_block = saved_block
+            
+        # Load server configs
+        self.server_configs = self.config.get("servers", {})
+
     def load_config(self):
         """Load configuration from JSON file"""
         try:
@@ -70,9 +82,9 @@ class TokenMonitor(commands.Cog):
             else:
                 # Create default config
                 default_config = {
-                    "monitor_channel_id": None,
                     "last_checked_block": None,
-                    "enabled": True
+                    "enabled": True,
+                    "servers": {}
                 }
                 self.save_config(default_config)
                 return default_config
@@ -85,9 +97,9 @@ class TokenMonitor(commands.Cog):
         try:
             if config is None:
                 config = {
-                    "monitor_channel_id": self.monitor_channel_id,
                     "last_checked_block": self.last_checked_block,
-                    "enabled": self.token_monitor.is_running() if hasattr(self, 'token_monitor') else True
+                    "enabled": self.token_monitor.is_running() if hasattr(self, 'token_monitor') else True,
+                    "servers": self.server_configs
                 }
             
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
@@ -95,17 +107,38 @@ class TokenMonitor(commands.Cog):
                 json.dump(config, f, indent=4)
         except Exception as e:
             print(f"❌ Error saving config: {e}")
+    
+    def get_server_config(self, guild_id):
+        """Get configuration for a specific server"""
+        return self.server_configs.get(str(guild_id), {
+            "monitor_channel_id": None,
+            "enabled": True
+        })
+    
+    def set_server_config(self, guild_id, key, value):
+        """Set configuration for a specific server"""
+        guild_id = str(guild_id)
+        if guild_id not in self.server_configs:
+            self.server_configs[guild_id] = {}
+        self.server_configs[guild_id][key] = value
+        self.save_config()
         
     @commands.Cog.listener()
     async def on_ready(self):
-        if self.web3.is_connected():
+        if hasattr(self, 'web3') and self.web3.is_connected():
             self.token_monitor.start()
             print("🔁 Token monitoring started")
-    
+        else:
+            print("❌ Token monitoring not started - Web3 connection failed")
+
     @tasks.loop(seconds=10)
     async def token_monitor(self):
         try:
             latest_block = self.web3.eth.block_number
+            
+            # Ensure last_checked_block is not None
+            if self.last_checked_block is None:
+                self.last_checked_block = latest_block - 1
             
             logs = self.web3.eth.get_logs({
                 "fromBlock": self.last_checked_block + 1,
@@ -125,26 +158,21 @@ class TokenMonitor(commands.Cog):
         except Exception as e:
             print(f"❌ Error polling events: {e}")
     
-    async def send_token_notification(self, args):
-        if not self.monitor_channel_id:
-            return
-            
-        channel = self.bot.get_channel(self.monitor_channel_id)
-        if not channel:
-            return
-        
-        # Create links
+    def _create_links_list(self, args):
         links = []
-        if args['website']: links.append(f"[Website]({args['website']})")
-        if args['twitter']: links.append(f"[Twitter]({args['twitter']})")
-        if args['telegram']: links.append(f"[Telegram]({args['telegram']})")
-        if args['discord']: links.append(f"[Discord]({args['discord']})")
-        
+        for platform in ['website', 'twitter', 'telegram', 'discord']:
+            if args[platform]:
+                links.append(f"[{platform.title()}]({args[platform]})")
+        return links
+
+    def _create_token_embed(self, args, links):
         embed = EmbedBuilder(
             title=f"🚀 New Token Created: {args['name']} ({args['symbol']})",
             description=args['description'][:1000] if args['description'] else "No description provided",
             color=discord.Color.green()
-        ).add_field(
+        )
+        
+        embed.add_field(
             name="📍 Addresses",
             value=f"**Token:** `{args['token']}`\n**Creator:** `{args['creator']}`",
             inline=False
@@ -166,37 +194,79 @@ class TokenMonitor(commands.Cog):
         
         if args['image_uri']:
             embed.set_thumbnail(args['image_uri'])
+            
+        return embed
+
+    async def _send_to_channel(self, channel, embed):
+        try:
+            await channel.send(embed=embed.build())
+        except Exception as e:
+            print(f"❌ Failed to send notification to {channel.guild.name}: {e}")
+
+    async def send_token_notification(self, args):
+        links = self._create_links_list(args)
+        embed = self._create_token_embed(args, links)
         
-        await channel.send(embed=embed.build())
+        for guild_id, server_config in self.server_configs.items():
+            if not server_config.get("enabled", True):
+                continue
+                
+            channel_id = server_config.get("monitor_channel_id")
+            if not channel_id:
+                continue
+                
+            channel = self.bot.get_channel(channel_id)
+            if channel:
+                await self._send_to_channel(channel, embed)
 
     @bridge.bridge_command(name="setmonitorchannel", description="Set the channel for token notifications")
     @commands.has_permissions(administrator=True)
     async def set_monitor_channel(self, ctx, channel: discord.TextChannel = None):
+        # Delete the command message if it's a prefix command
+        if hasattr(ctx, 'message') and ctx.message:
+            try:
+                await ctx.message.delete()
+            except discord.Forbidden:
+                pass
+        
         if channel is None:
             channel = ctx.channel
         
-        self.monitor_channel_id = channel.id
-        self.save_config()  # Save config when channel is changed
+        self.set_server_config(ctx.guild.id, "monitor_channel_id", channel.id)
         
         embed = EmbedBuilder(
             title="✅ Monitor Channel Set",
-            description=f"Token notifications will be sent to {channel.mention}",
+            description=f"Token notifications will be sent to {channel.mention} for this server",
             color=discord.Color.green()
         ).build()
         
-        await ctx.respond(embed=embed)
+        await ctx.respond(embed=embed, delete_after=5)
 
     @bridge.bridge_command(name="monitorstatus", description="Get current monitoring status")
     async def monitor_status(self, ctx):
+        # Delete the command message if it's a prefix command
+        if hasattr(ctx, 'message') and ctx.message:
+            try:
+                await ctx.message.delete()
+            except discord.Forbidden:
+                pass
+        
+        server_config = self.get_server_config(ctx.guild.id)
         status = "🟢 Active" if self.token_monitor.is_running() else "🔴 Inactive"
-        channel = f"<#{self.monitor_channel_id}>" if self.monitor_channel_id else "Not set"
+        channel_id = server_config.get("monitor_channel_id")
+        channel = f"<#{channel_id}>" if channel_id else "Not set"
+        server_enabled = "🟢 Enabled" if server_config.get("enabled", True) else "🔴 Disabled"
         
         embed = EmbedBuilder(
             title="📊 Token Monitor Status",
             color=discord.Color.blue()
         ).add_field(
-            name="Status", 
+            name="Global Status", 
             value=status, 
+            inline=True
+        ).add_field(
+            name="Server Status", 
+            value=server_enabled, 
             inline=True
         ).add_field(
             name="Channel", 
@@ -206,10 +276,41 @@ class TokenMonitor(commands.Cog):
             name="Last Block", 
             value=self.last_checked_block, 
             inline=True
+        ).add_field(
+            name="Total Servers", 
+            value=len(self.server_configs), 
+            inline=True
         ).build()
         
         await ctx.respond(embed=embed)
     
+    @bridge.bridge_command(name="togglemonitor", description="Enable/disable monitoring for this server")
+    @commands.has_permissions(administrator=True)
+    async def toggle_monitor(self, ctx):
+        # Delete the command message if it's a prefix command
+        if hasattr(ctx, 'message') and ctx.message:
+            try:
+                await ctx.message.delete()
+            except discord.Forbidden:
+                pass
+        
+        server_config = self.get_server_config(ctx.guild.id)
+        current_status = server_config.get("enabled", True)
+        new_status = not current_status
+        
+        self.set_server_config(ctx.guild.id, "enabled", new_status)
+        
+        status_text = "enabled" if new_status else "disabled"
+        color = discord.Color.green() if new_status else discord.Color.red()
+        
+        embed = EmbedBuilder(
+            title=f"✅ Monitor {status_text.title()}",
+            description=f"Token monitoring has been {status_text} for this server",
+            color=color
+        ).build()
+        
+        await ctx.respond(embed=embed, delete_after=5)
+
     def cog_unload(self):
         self.save_config()  # Save config when cog is unloaded
         self.token_monitor.cancel()

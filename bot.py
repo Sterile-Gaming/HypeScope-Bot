@@ -28,10 +28,24 @@ async def on_message(message):
 
 @bot.bridge_command(description="Say hello!")
 async def hello(ctx):
+    # Delete the command message if it's a prefix command
+    if hasattr(ctx, 'message') and ctx.message:
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass
+    
     await ctx.respond(f"Hello {ctx.author.mention}!")
 
 @bot.bridge_command(description="Get bot info")
 async def info(ctx):
+    # Delete the command message if it's a prefix command
+    if hasattr(ctx, 'message') and ctx.message:
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass
+    
     embed = EmbedBuilder(
         title="Bot Information",
         description="HypeScope Bot",
