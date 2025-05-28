@@ -35,20 +35,27 @@ async def on_message(message):
 @bot.bridge_command(description="Say hello!")
 async def hello(ctx):
     # Delete the command message if it's a prefix command
+    message_deleted = False
     if hasattr(ctx, 'message') and ctx.message:
         try:
             await ctx.message.delete()
+            message_deleted = True
         except discord.Forbidden:
             pass
     
-    await ctx.respond(f"Hello {ctx.author.mention}!")
+    if message_deleted:
+        await ctx.send(f"Hello {ctx.author.mention}!")
+    else:
+        await ctx.respond(f"Hello {ctx.author.mention}!")
 
 @bot.bridge_command(description="Get bot info")
 async def info(ctx):
     # Delete the command message if it's a prefix command
+    message_deleted = False
     if hasattr(ctx, 'message') and ctx.message:
         try:
             await ctx.message.delete()
+            message_deleted = True
         except discord.Forbidden:
             pass
     
@@ -69,7 +76,10 @@ async def info(ctx):
         icon_url=ctx.author.avatar.url if ctx.author.avatar else None
     ).build()
     
-    await ctx.respond(embed=embed)
+    if message_deleted:
+        await ctx.send(embed=embed)
+    else:
+        await ctx.respond(embed=embed)
 
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')

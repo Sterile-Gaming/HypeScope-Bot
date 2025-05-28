@@ -254,9 +254,11 @@ class TokenMonitor(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def set_monitor_channel(self, ctx, channel: discord.TextChannel = None):
         # Delete the command message if it's a prefix command
+        message_deleted = False
         if hasattr(ctx, 'message') and ctx.message:
             try:
                 await ctx.message.delete()
+                message_deleted = True
             except discord.Forbidden:
                 pass
         
@@ -271,7 +273,11 @@ class TokenMonitor(commands.Cog):
             color=discord.Color.green()
         ).build()
         
-        await ctx.respond(embed=embed, delete_after=5)
+        if message_deleted:
+            # Send a new message instead of replying if original was deleted
+            await ctx.send(embed=embed, delete_after=5)
+        else:
+            await ctx.respond(embed=embed, delete_after=5)
 
     @bridge.bridge_command(name="monitorstatus", description="Get current monitoring status")
     async def monitor_status(self, ctx):
@@ -319,9 +325,11 @@ class TokenMonitor(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def toggle_monitor(self, ctx):
         # Delete the command message if it's a prefix command
+        message_deleted = False
         if hasattr(ctx, 'message') and ctx.message:
             try:
                 await ctx.message.delete()
+                message_deleted = True
             except discord.Forbidden:
                 pass
         
@@ -340,7 +348,11 @@ class TokenMonitor(commands.Cog):
             color=color
         ).build()
         
-        await ctx.respond(embed=embed, delete_after=5)
+        if message_deleted:
+            # Send a new message instead of replying if original was deleted
+            await ctx.send(embed=embed, delete_after=5)
+        else:
+            await ctx.respond(embed=embed, delete_after=5)
 
     def cog_unload(self):
         """Properly clean up when cog is unloaded"""
