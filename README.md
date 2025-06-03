@@ -1,4 +1,4 @@
-# HypeScope Bot
+# HyperScope Bot
 
 A Discord bot built with py-cord that monitors Hyperliquid blockchain for new token creation events.
 
@@ -47,7 +47,7 @@ A Discord bot built with py-cord that monitors Hyperliquid blockchain for new to
 3. View logs:
 
    ```
-   docker-compose logs -f hypescope-bot
+   docker-compose logs -f HyperScope-bot
    ```
 
 4. Stop the bot:
